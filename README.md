@@ -25,6 +25,15 @@ python3 app.py --db ./data.db --port 8304
 ## 核心对象
 
 - `dataset`：受控数据集；`application`：访问申请；`grant`：限时数据使用凭证。
+- `committee`：评审委员会；管理员登记委员名单、利益冲突成员和代理期限（`proxies`：`delegator`/`proxy`/`starts_at`/`expires_at`），可用`amend`动作调整。
+
+## 会议表决流程
+
+1. 管理员创建`committee`并登记委员、冲突名单和代理期限。
+2. 申请`submit`后执行`review`（带`committee_id`），系统把当时的有资格委员、冲突名单和代理关系快照锁定到申请上，之后调整委员会不影响本次审阅。
+3. 委员通过`vote`动作投票（`{"vote":"approve|reject|abstain"}`），每个席位只能投一次；冲突成员只能投`abstain`；休假委员由代理用`on_behalf_of`代投，记录同时保留委托人与投票人。
+4. 无冲突同意达到三票且没有反对票时，才允许`approve`；票数不足或存在反对时申请留在`under_review`，`pending_reason`说明缺票原因。
+5. 表决结论以申请上锁定的选票为准，事后`amend`委员会不改本次结论。
 
 ## 主要接口
 

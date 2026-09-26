@@ -32,11 +32,27 @@ class WorkflowTest(unittest.TestCase):
 
     def test_full_workflow(self):
         created = {}
-        steps = [{'op': 'create', 'as': 'dataset', 'kind': 'dataset', 'data': {'name': 'Rare Disease Cohort', 'access_policy': 'controlled'}}, {'op': 'create', 'as': 'application', 'kind': 'application', 'data': {'dataset_id': '{dataset}', 'applicant_id': 'APP-1', 'purpose': 'variant analysis'}}, {'op': 'transition', 'target': 'application', 'action': 'submit', 'data': {}, 'expect': 'submitted'}, {'op': 'transition', 'target': 'application', 'action': 'review', 'data': {'committee_id': 'committee-a'}, 'expect': 'under_review'}, {'op': 'transition', 'target': 'application', 'action': 'approve', 'data': {'approvals': ['r1', 'r2', 'r3'], 'terms': 'noncommercial', 'expires_at': '2099-01-01'}, 'expect': 'approved'}, {'op': 'create', 'as': 'grant', 'kind': 'grant', 'data': {'application_id': '{application}', 'dataset_id': '{dataset}', 'recipient': 'researcher-1'}}, {'op': 'transition', 'target': 'grant', 'action': 'activate', 'data': {'starts_at': '2026-09-24', 'expires_at': '2099-01-01'}, 'expect': 'active'}, {'op': 'transition', 'target': 'grant', 'action': 'revoke', 'data': {'reason': 'purpose changed'}, 'expect': 'revoked'}]
+        steps = [
+            {'op': 'create', 'as': 'dataset', 'kind': 'dataset', 'data': {'name': 'Rare Disease Cohort', 'access_policy': 'controlled'}},
+            {'op': 'create', 'as': 'committee', 'kind': 'committee', 'data': {'name': 'DAC-A', 'members': ['r1', 'r2', 'r3']}},
+            {'op': 'create', 'as': 'application', 'kind': 'application', 'data': {'dataset_id': '{dataset}', 'applicant_id': 'APP-1', 'purpose': 'variant analysis'}},
+            {'op': 'transition', 'target': 'application', 'action': 'submit', 'data': {}, 'expect': 'submitted'},
+            {'op': 'transition', 'target': 'application', 'action': 'review', 'data': {'committee_id': '{committee}'}, 'expect': 'under_review'},
+            {'op': 'transition', 'target': 'application', 'action': 'vote', 'actor': ('r1', 'committee'), 'data': {'vote': 'approve'}, 'expect': 'under_review'},
+            {'op': 'transition', 'target': 'application', 'action': 'vote', 'actor': ('r2', 'committee'), 'data': {'vote': 'approve'}, 'expect': 'under_review'},
+            {'op': 'transition', 'target': 'application', 'action': 'vote', 'actor': ('r3', 'committee'), 'data': {'vote': 'approve'}, 'expect': 'under_review'},
+            {'op': 'transition', 'target': 'application', 'action': 'approve', 'data': {'terms': 'noncommercial', 'expires_at': '2099-01-01'}, 'expect': 'approved'},
+            {'op': 'create', 'as': 'grant', 'kind': 'grant', 'data': {'application_id': '{application}', 'dataset_id': '{dataset}', 'recipient': 'researcher-1'}},
+            {'op': 'transition', 'target': 'grant', 'action': 'activate', 'data': {'starts_at': '2026-09-24', 'expires_at': '2099-01-01'}, 'expect': 'active'},
+            {'op': 'transition', 'target': 'grant', 'action': 'revoke', 'data': {'reason': 'purpose changed'}, 'expect': 'revoked'},
+        ]
         for step in steps:
+            actor = self.actor
+            if step.get("actor"):
+                actor = Actor(step["actor"][0], step["actor"][1])
             if step["op"] == "create":
                 entity = self.service.create(
-                    self.actor,
+                    actor,
                     step["kind"],
                     _resolve(step.get("data", {}), created),
                     step.get("idempotency_key"),
@@ -44,7 +60,7 @@ class WorkflowTest(unittest.TestCase):
                 created[step["as"]] = entity["id"]
             else:
                 entity = self.service.transition(
-                    self.actor,
+                    actor,
                     created[step["target"]],
                     step["action"],
                     _resolve(step.get("data", {}), created),
@@ -52,6 +68,9 @@ class WorkflowTest(unittest.TestCase):
                 )
             if "expect" in step:
                 self.assertEqual(entity["status"], step["expect"])
+        application = self.service.get(created["application"])
+        self.assertEqual(application["data"]["tally"]["approvals"], 3)
+        self.assertTrue(application["data"]["tally"]["quorum_met"])
 
 
 if __name__ == "__main__":
